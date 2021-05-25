@@ -16,6 +16,8 @@ from utils.model_utils import setup_model
 from utils.common import tensor2im
 from utils.alignment import align_face
 from PIL import Image
+from tqdm import tqdm
+import pandas
 
 
 def main(args):
@@ -27,10 +29,14 @@ def main(args):
 
     # Check if latents exist
     latents_file_path = os.path.join(args.save_dir, 'latents.pt')
+    attributes_file_path = os.path.join(args.save_dir, 'attributes.txt')
     if os.path.exists(latents_file_path):
         latent_codes = torch.load(latents_file_path).to(device)
     else:
-        latent_codes = get_all_latents(net, data_loader, args.n_sample, is_cars=is_cars)
+        latent_codes, df = get_all_latents(net, data_loader, args.n_sample, is_cars=is_cars)
+        df.columns = data_loader.dataset.attribute_names
+        with open(attributes_file_path,'w') as outfile:
+            df.to_string(outfile)
         torch.save(latent_codes, latents_file_path)
 
     if not args.latents_only:
@@ -48,6 +54,7 @@ def setup_data_loader(args, opts):
     test_dataset = InferenceDataset(root=images_path,
                                     transform=transforms_dict['transform_test'],
                                     preprocess=align_function,
+                                    split=args.split,
                                     opts=opts)
 
     data_loader = DataLoader(test_dataset,
@@ -77,22 +84,30 @@ def get_latents(net, x, is_cars=False):
 
 def get_all_latents(net, data_loader, n_images=None, is_cars=False):
     all_latents = []
+    attributes = []
+    paths = []
     i = 0
+    
     with torch.no_grad():
-        for batch in data_loader:
+        for batch in tqdm(data_loader):
             if n_images is not None and i > n_images:
                 break
-            x = batch
+            x = batch[0]
             inputs = x.to(device).float()
             latents = get_latents(net, inputs, is_cars)
             all_latents.append(latents)
+            attributes.append(batch[1].squeeze().numpy())
+            paths.append(batch[2][0])
             i += len(latents)
-    return torch.cat(all_latents)
+    attributes = np.array(attributes)
+    df = pandas.DataFrame(attributes, index=paths)
+
+    return torch.cat(all_latents), df
 
 
 def save_image(img, save_dir, idx):
     result = tensor2im(img)
-    im_save_path = os.path.join(save_dir, f"{idx:05d}.jpg")
+    im_save_path = os.path.join(save_dir, f"{idx:06d}.jpg")
     Image.fromarray(np.array(result)).save(im_save_path)
 
 
@@ -123,6 +138,8 @@ if __name__ == "__main__":
                         help="The directory of the images to be inverted")
     parser.add_argument("--save_dir", type=str, default=None,
                         help="The directory to save the latent codes and inversion images. (default: images_dir")
+    parser.add_argument("--split", type=str, default="train",
+                        help="Split of the dataset to convert")
     parser.add_argument("--batch", type=int, default=1, help="batch size for the generator")
     parser.add_argument("--n_sample", type=int, default=None, help="number of the samples to infer.")
     parser.add_argument("--latents_only", action="store_true", help="infer only the latent codes of the directory")

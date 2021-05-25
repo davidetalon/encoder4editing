@@ -31,8 +31,12 @@ def align_face(filepath, predictor):
     :param filepath: str
     :return: PIL Image
     """
-
-    lm = get_landmark(filepath, predictor)
+    try:
+        lm = get_landmark(filepath, predictor)
+    except UnboundLocalError:
+        print("Error")
+        img = PIL.Image.open(filepath)
+        return img
 
     lm_chin = lm[0: 17]  # left-right
     lm_eyebrow_left = lm[17: 22]  # left-right
